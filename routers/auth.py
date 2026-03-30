@@ -50,10 +50,15 @@ async def register(req: RegisterRequest, bg: BackgroundTasks):
     bg.add_task(send_verification_email, str(req.email), req.name, verify_token)
 
     token = create_token(user_id)
-    return AuthResponse(
-        token=token, user_id=user_id, email=str(req.email),
-        name=req.name, plan="free", listings_used=0, listings_quota=5
-    )
+  return AuthResponse(
+    token=token,
+    user_id=str(user["id"]),
+    email=user["email"],
+    name=user["name"],
+    plan=user.get("plan") or "free",
+    listings_used=user.get("listings_used") or 0,
+    listings_quota=user.get("listings_quota") or 5,
+)
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -99,8 +104,9 @@ async def me(authorization: str = None):
         raise HTTPException(404, "User not found")
     return {
         "user_id": user["id"], "email": user["email"],
-        "name": user["name"], "plan": user["plan"],
-        "listings_used": user["listings_used"],
-        "listings_quota": user["listings_quota"],
+        "name": user["name"], "plan": user.get("plan") or "free",
+	"listings_used": user.get("listings_used") or 0,
+	"listings_quota": user.get("listings_quota") or 5,
+
         "email_verified": user["email_verified"],
     }
