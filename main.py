@@ -25,6 +25,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         FRONTEND,
+	"https://listai-landing.vercel.app",
         "http://localhost:3000",
         "http://localhost:5500",   # VS Code Live Server
         "http://127.0.0.1:5500",
