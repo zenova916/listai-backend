@@ -70,12 +70,12 @@ async def login(req: LoginRequest):
     token = create_token(user["id"])
     return AuthResponse(
         token=token,
-        user_id=user["id"],
+        user_id=str(user["id"]),
         email=user["email"],
         name=user["name"],
-        plan=user["plan"],
-        listings_used=user["listings_used"],
-        listings_quota=user["listings_quota"],
+        plan=user.get("plan") or "free",
+        listings_used=user.get("listings_used") or 0,
+        listings_quota=user.get("listings_quota") or 5,
     )
 
 
@@ -105,8 +105,8 @@ async def me(authorization: str = None):
     return {
         "user_id": user["id"], "email": user["email"],
         "name": user["name"], "plan": user.get("plan") or "free",
-	"listings_used": user.get("listings_used") or 0,
-	"listings_quota": user.get("listings_quota") or 5,
+    "listings_used": user.get("listings_used") or 0,
+    "listings_quota": user.get("listings_quota") or 5,
 
         "email_verified": user["email_verified"],
     }
