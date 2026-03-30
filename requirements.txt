@@ -1,0 +1,25 @@
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-dotenv==1.0.1
+pydantic[email]==2.7.1
+python-multipart==0.0.9
+
+# Database - Supabase (uses standard postgres driver)
+asyncpg==0.29.0
+sqlalchemy[asyncio]==2.0.30
+
+# Auth
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+
+# AI - Groq (free)
+groq==0.9.0
+
+# HTTP calls (eBay API, PayPal)
+httpx==0.27.0
+
+# Email - Resend (free)
+resend==0.7.0
+
+# CSV parsing
+python-csv==0.0.13
