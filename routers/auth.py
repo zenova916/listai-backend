@@ -42,23 +42,22 @@ async def register(req: RegisterRequest, bg: BackgroundTasks):
     if existing:
         raise HTTPException(400, "An account with this email already exists")
 
-    pw_hash      = hash_password(req.password)
+    pw_hash = hash_password(req.password)
     verify_token = generate_verify_token()
-    user_id      = await create_user(req.name, str(req.email), pw_hash, verify_token)
+    user_id = await create_user(req.name, str(req.email), pw_hash, verify_token)
 
-    # Send verification email in background (non-blocking)
     bg.add_task(send_verification_email, str(req.email), req.name, verify_token)
 
     token = create_token(user_id)
-  return AuthResponse(
-    token=token,
-    user_id=str(user["id"]),
-    email=user["email"],
-    name=user["name"],
-    plan=user.get("plan") or "free",
-    listings_used=user.get("listings_used") or 0,
-    listings_quota=user.get("listings_quota") or 5,
-)
+    return AuthResponse(
+        token=token,
+        user_id=user_id,
+        email=str(req.email),
+        name=req.name,
+        plan="free",
+        listings_used=0,
+        listings_quota=5,
+    )
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -84,17 +83,11 @@ async def verify_email(token: str, bg: BackgroundTasks):
     ok = await verify_user_email(token)
     if not ok:
         raise HTTPException(400, "Invalid or expired verification link")
-    # Send welcome email
-    # (we don't have email here easily — bg task fires separately)
     return {"status": "verified", "message": "Email verified. You can now log in."}
 
 
 @router.get("/me")
 async def me(authorization: str = None):
-    """Return current user info from token."""
-    from services.auth_service import get_current_user
-    from fastapi import Header
-    # Used by frontend to refresh user state
     if not authorization:
         raise HTTPException(401, "No token")
     from services.auth_service import decode_token
@@ -103,10 +96,11 @@ async def me(authorization: str = None):
     if not user:
         raise HTTPException(404, "User not found")
     return {
-        "user_id": user["id"], "email": user["email"],
-        "name": user["name"], "plan": user.get("plan") or "free",
-    "listings_used": user.get("listings_used") or 0,
-    "listings_quota": user.get("listings_quota") or 5,
-
+        "user_id": user["id"],
+        "email": user["email"],
+        "name": user["name"],
+        "plan": user.get("plan") or "free",
+        "listings_used": user.get("listings_used") or 0,
+        "listings_quota": user.get("listings_quota") or 5,
         "email_verified": user["email_verified"],
     }
