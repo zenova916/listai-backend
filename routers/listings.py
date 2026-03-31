@@ -40,16 +40,15 @@ class PublishRequest(BaseModel):
 # ── Check + consume quota ─────────────────────────────────────
 
 async def check_quota(user: dict, count: int = 1):
-     quota = user["listings_quota"] or 5
+    quota = user["listings_quota"] or 5
     used = user["listings_used"] or 0
     remaining = quota - used
     if remaining < count:
         raise HTTPException(
             403,
-            f"Listing quota reached ({user['listings_quota']}/month on {user['plan']} plan). "
+            f"Listing quota reached ({quota}/month on {user['plan']} plan). "
             "Upgrade to get more listings."
         )
-
 
 async def consume_quota(user_id: str, count: int = 1):
     from db.supabase_client import AsyncSessionLocal
