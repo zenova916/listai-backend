@@ -20,17 +20,13 @@ if DATABASE_URL.startswith("postgres://"):
 elif DATABASE_URL.startswith("postgresql://") and "+asyncpg" not in DATABASE_URL:
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-if "?" in DATABASE_URL:
-    DB_URL = DATABASE_URL + "&statement_cache_size=0"
-else:
-    DB_URL = DATABASE_URL + "?statement_cache_size=0"
-
 engine = create_async_engine(
-    DB_URL,
+    DATABASE_URL,
     echo=False,
     poolclass=NullPool,
     connect_args={
         "ssl": "require",
+        "statement_cache_size": 0,
         "server_settings": {"application_name": "listai"},
     },
 )
