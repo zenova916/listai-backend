@@ -20,17 +20,20 @@ app = FastAPI(
 )
 
 # ── CORS — allow your Vercel frontend ────────────────────────
-FRONTEND = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+app = FastAPI()
+
+# Allowed origins
+origins = [
+    "https://listai-landing.vercel.app",
+    "http://localhost:3000",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500"
+]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        FRONTEND,
-        "https://listai-landing.vercel.app",
-        "http://localhost:3000",
-        "http://localhost:5500",
-        "http://127.0.0.1:5500",
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
