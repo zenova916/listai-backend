@@ -40,7 +40,9 @@ class PublishRequest(BaseModel):
 # ── Check + consume quota ─────────────────────────────────────
 
 async def check_quota(user: dict, count: int = 1):
-    remaining = user["listings_quota"] - user["listings_used"]
+     quota = user["listings_quota"] or 5
+    used = user["listings_used"] or 0
+    remaining = quota - used
     if remaining < count:
         raise HTTPException(
             403,
