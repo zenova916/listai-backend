@@ -26,8 +26,8 @@ engine = create_async_engine(
     poolclass=NullPool,
     connect_args={
         "ssl": "require",
-        "prepared_statement_cache_size": 0,
         "server_settings": {"application_name": "listai"},
+        "statement_cache_size": 0,
     },
 )
 AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
