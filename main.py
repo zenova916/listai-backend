@@ -20,21 +20,10 @@ app = FastAPI(
 )
 
 # ── CORS — allow your Vercel frontend ────────────────────────
-
-app = FastAPI()
-
-# Allowed origins
-origins = [
-    "https://listai-landing.vercel.app",
-    "http://localhost:3000",
-    "http://localhost:5500",
-    "http://127.0.0.1:5500"
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -55,6 +44,7 @@ async def startup():
     print(f"   AI:       Groq ({os.getenv('GROQ_API_KEY', 'NOT SET')[:8]}...)")
     print(f"   Database: Supabase ({os.getenv('SUPABASE_URL', 'NOT SET')})")
     print(f"   PayPal:   {os.getenv('PAYPAL_MODE', 'NOT SET')} mode")
+    print(f"   Frontend: {FRONTEND}")
 
 
 @app.get("/health")
