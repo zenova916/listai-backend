@@ -13,14 +13,17 @@ FRONTEND = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
 
 @router.get("/connect")
-async def connect_ebay(sandbox: bool = True, user=Depends(get_current_user)):
+async def connect_ebay(sandbox: bool = False, token: str = None):
     """
     Redirect user to eBay OAuth.
-    Use sandbox=true for testing (default), sandbox=false for real listings.
+    Token passed as query param since this is a browser redirect.
     """
+    if not token:
+        raise HTTPException(401, "Missing token")
+    from services.auth_service import decode_token
+    user_id = decode_token(token)
     url = get_auth_url(sandbox=sandbox)
-    # Store user_id and sandbox flag in eBay's state param
-    url += f"&state={user['id']}|{'1' if sandbox else '0'}"
+    url += f"&state={user_id}|{'1' if sandbox else '0'}"
     return RedirectResponse(url)
 
 
