@@ -44,7 +44,7 @@ async def startup():
     print(f"   AI:       Groq ({os.getenv('GROQ_API_KEY', 'NOT SET')[:8]}...)")
     print(f"   Database: Supabase ({os.getenv('SUPABASE_URL', 'NOT SET')})")
     print(f"   PayPal:   {os.getenv('PAYPAL_MODE', 'NOT SET')} mode")
-    print(f"   Frontend: {FRONTEND}")
+    print(f"   Frontend: {os.getenv('FRONTEND_URL', 'not set')}")
 
 
 @app.get("/health")
