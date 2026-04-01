@@ -281,9 +281,6 @@ async def save_ebay_account(user_id: str, ebay_username: str,
                 INSERT INTO ebay_accounts
                     (id, user_id, ebay_username, access_token, refresh_token, token_expires_at, sandbox)
                 VALUES (:id, :uid, :username, :at, :rt, :exp, :sandbox)
-                ON CONFLICT (user_id) DO UPDATE
-                SET access_token=:at, refresh_token=:rt,
-                    token_expires_at=:exp, ebay_username=:username
             """),
             {"id": aid, "uid": user_id, "username": ebay_username,
              "at": access_token_enc, "rt": refresh_token_enc,
