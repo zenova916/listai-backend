@@ -91,3 +91,18 @@ async def activate_manually(subscription_id: str, email: str):
 
     await update_user_plan(user["id"], plan, subscription_id)
     return {"status": "activated", "plan": plan, "user": email}
+
+@router.get("/ebay-account-deletion")
+async def ebay_deletion_challenge(challenge_code: str = None):
+    """eBay marketplace account deletion compliance endpoint."""
+    import hashlib
+    verification_token = os.getenv("EBAY_VERIFICATION_TOKEN", "listai_webhook_verify_2026")
+    endpoint = "https://listai-api.onrender.com/webhooks/ebay-account-deletion"
+    m = hashlib.sha256()
+    m.update((challenge_code + verification_token + endpoint).encode())
+    return {"challengeResponse": m.hexdigest()}
+
+@router.post("/ebay-account-deletion")
+async def ebay_account_deletion(request: Request):
+    """Handle eBay account deletion notifications."""
+    return {"status": "processed"}
