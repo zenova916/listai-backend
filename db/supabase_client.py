@@ -265,7 +265,7 @@ async def mark_listing_failed(listing_id: str, error: str):
 async def get_ebay_accounts(user_id: str):
     async with AsyncSessionLocal() as db:
         result = await db.execute(
-            text("SELECT id, ebay_username, sandbox, created_at FROM ebay_accounts WHERE user_id=:uid"),
+            text("SELECT * FROM ebay_accounts WHERE user_id=:uid"),
             {"uid": user_id}
         )
         return [dict(r) for r in result.mappings().all()]
