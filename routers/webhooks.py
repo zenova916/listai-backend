@@ -95,7 +95,9 @@ async def activate_manually(subscription_id: str, email: str):
 @router.get("/ebay-account-deletion")
 async def ebay_deletion_challenge(challenge_code: str = None):
     """eBay marketplace account deletion compliance endpoint."""
-    import hashlib
+    import hashlib, os
+    if not challenge_code:
+        return {"status": "ok"}
     verification_token = os.getenv("EBAY_VERIFICATION_TOKEN", "listai_webhook_verification_token_2026_secure")
     endpoint = "https://listai-api.onrender.com/webhooks/ebay-account-deletion"
     m = hashlib.sha256()
