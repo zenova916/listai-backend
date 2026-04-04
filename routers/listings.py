@@ -9,9 +9,9 @@ from services.ebay_service import publish_to_ebay, get_item_status
 from db.supabase_client import (
     save_listing, get_user_listings, update_listing,
     mark_listing_published, mark_listing_failed,
-    get_ebay_accounts
+    get_ebay_accounts, reset_quota_if_needed,
+    PLAN_CSV_ALLOWED, PLAN_IMAGE_ALLOWED
 )
-from sqlalchemy.ext.asyncio import AsyncSession
 from db.supabase_client import get_db
 
 router = APIRouter()
@@ -40,15 +40,19 @@ class PublishRequest(BaseModel):
 # ── Check + consume quota ─────────────────────────────────────
 
 async def check_quota(user: dict, count: int = 1):
-    quota = user["listings_quota"] or 5
-    used = user["listings_used"] or 0
+    """Check quota AFTER monthly reset has been applied."""
+    quota = user.get("listings_quota") or 5
+    used  = user.get("listings_used") or 0
+    if quota == 999999:
+        return  # agency — unlimited
     remaining = quota - used
     if remaining < count:
         raise HTTPException(
             403,
-            f"Listing quota reached ({quota}/month on {user['plan']} plan). "
-            "Upgrade to get more listings."
+            f"Listing quota reached ({used}/{quota} used on {user.get('plan','free')} plan). "
+            "Upgrade your plan to get more listings."
         )
+
 
 async def consume_quota(user_id: str, count: int = 1):
     from db.supabase_client import AsyncSessionLocal
@@ -65,6 +69,10 @@ async def consume_quota(user_id: str, count: int = 1):
 
 @router.post("/generate/title")
 async def generate_from_title(req: TitleRequest, user=Depends(get_current_user)):
+    # 1. Reset monthly quota if 30 days have passed
+    user = await reset_quota_if_needed(user)
+
+    # 2. Check quota
     await check_quota(user, 1)
 
     try:
@@ -110,6 +118,15 @@ async def generate_from_csv(
     bg: BackgroundTasks = None,
     user=Depends(get_current_user),
 ):
+    # Plan check — CSV only for Starter, Pro, Agency
+    plan = user.get("plan", "free")
+    if plan not in PLAN_CSV_ALLOWED:
+        raise HTTPException(
+            403,
+            "CSV bulk upload requires Starter plan or higher. "
+            "Upgrade your plan to use this feature."
+        )
+
     contents = await file.read()
     try:
         reader = csv.DictReader(io.StringIO(contents.decode("utf-8-sig")))
@@ -122,9 +139,10 @@ async def generate_from_csv(
     if len(rows) > 100:
         raise HTTPException(400, "Max 100 rows per upload")
 
+    # Reset monthly quota then check
+    user = await reset_quota_if_needed(user)
     await check_quota(user, len(rows))
 
-    # Process in background
     bg.add_task(_process_csv_rows, rows, user["id"], ebay_account_id)
 
     return {
@@ -260,7 +278,6 @@ async def refresh_status(listing_id: str, user=Depends(get_current_user)):
         account["access_token"],
         sandbox=account["sandbox"],
     )
-    # Map eBay status to our status
     status_map = {"Active": "active", "Completed": "sold", "Ended": "ended"}
     our_status = status_map.get(ebay_status, "active")
     await update_listing(listing_id, user["id"], {"status": our_status})

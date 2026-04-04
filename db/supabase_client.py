@@ -47,9 +47,10 @@ class User(Base):
     password_hash      = Column(String, nullable=False)
     email_verified     = Column(Boolean, default=False)
     verify_token       = Column(String)
-    plan               = Column(String, default="free")   # free / starter / pro
+    plan               = Column(String, default="free")   # free / starter / pro / agency
     listings_used      = Column(Integer, default=0)
-    listings_quota     = Column(Integer, default=5)       # free = 5, starter = 50, pro = 500
+    listings_quota     = Column(Integer, default=5)       # free=5, starter=50, pro=500, agency=999999
+    quota_reset_at     = Column(DateTime(timezone=True), server_default=func.now())  # tracks monthly reset
     paypal_sub_id      = Column(String)
     created_at         = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -59,6 +60,7 @@ class EbayAccount(Base):
     id                 = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id            = Column(String, ForeignKey("users.id"), nullable=False)
     ebay_username      = Column(String)
+    ebay_email         = Column(String)
     access_token       = Column(Text)   # encrypted
     refresh_token      = Column(Text)   # encrypted
     token_expires_at   = Column(DateTime(timezone=True))
@@ -114,11 +116,88 @@ async def create_tables():
     """Run once on startup to create all tables if they don't exist."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Add quota_reset_at column if it doesn't exist yet (safe migration)
+        await conn.execute(text("""
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS quota_reset_at TIMESTAMPTZ DEFAULT NOW()
+        """))
 
 
 async def get_db():
     async with AsyncSessionLocal() as session:
         yield session
+
+
+# ── PLAN CONFIG ───────────────────────────────────────────────
+
+# Listings quota per plan (agency = effectively unlimited)
+PLAN_QUOTAS = {
+    "free":    5,
+    "starter": 50,
+    "pro":     500,
+    "agency":  999999,
+}
+
+# Max eBay accounts per plan
+PLAN_EBAY_ACCOUNTS = {
+    "free":    1,
+    "starter": 1,
+    "pro":     3,
+    "agency":  10,
+}
+
+# Which plans can use CSV bulk upload
+PLAN_CSV_ALLOWED = {"starter", "pro", "agency"}
+
+# Which plans can use image upload
+PLAN_IMAGE_ALLOWED = {"pro", "agency"}
+
+
+# ── MONTHLY QUOTA RESET ───────────────────────────────────────
+
+async def reset_quota_if_needed(user: dict) -> dict:
+    """
+    Check if the user's quota needs a monthly reset.
+    Resets listings_used to 0 if it's been more than 30 days since last reset.
+    Returns the updated user dict.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    reset_at = user.get("quota_reset_at")
+    if reset_at is None:
+        # Column didn't exist before, set it now
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                text("UPDATE users SET quota_reset_at = NOW() WHERE id = :id"),
+                {"id": user["id"]}
+            )
+            await db.commit()
+        return user
+
+    # Make reset_at timezone-aware if it isn't
+    if hasattr(reset_at, 'tzinfo') and reset_at.tzinfo is None:
+        reset_at = reset_at.replace(tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    days_since_reset = (now - reset_at).days
+
+    if days_since_reset >= 30:
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                text("""
+                    UPDATE users
+                    SET listings_used = 0, quota_reset_at = NOW()
+                    WHERE id = :id
+                """),
+                {"id": user["id"]}
+            )
+            await db.commit()
+        # Return updated user
+        user = dict(user)
+        user["listings_used"] = 0
+        print(f"[QUOTA] Reset monthly quota for user {user['id']}")
+
+    return user
 
 
 # ── QUERY HELPERS ─────────────────────────────────────────────
@@ -175,13 +254,14 @@ async def verify_user_email(token: str) -> bool:
 
 
 async def update_user_plan(user_id: str, plan: str, paypal_sub_id: str):
-    quotas = {"free": 5, "starter": 50, "pro": 500}
-    quota = quotas.get(plan, 5)
+    # FIXED: agency was missing, now all 4 plans covered
+    quota = PLAN_QUOTAS.get(plan, 5)
     async with AsyncSessionLocal() as db:
         await db.execute(
             text("""
                 UPDATE users
-                SET plan=:plan, listings_quota=:quota, paypal_sub_id=:sub_id
+                SET plan=:plan, listings_quota=:quota, paypal_sub_id=:sub_id,
+                    listings_used=0, quota_reset_at=NOW()
                 WHERE id=:id
             """),
             {"plan": plan, "quota": quota, "sub_id": paypal_sub_id, "id": user_id}
@@ -271,7 +351,7 @@ async def get_ebay_accounts(user_id: str):
         return [dict(r) for r in result.mappings().all()]
 
 
-async def save_ebay_account(user_id: str, ebay_username: str,
+async def save_ebay_account(user_id: str, ebay_username: str, ebay_email: str,
                              access_token_enc: str, refresh_token_enc: str,
                              expires_at, sandbox: bool):
     aid = str(uuid.uuid4())
@@ -279,15 +359,26 @@ async def save_ebay_account(user_id: str, ebay_username: str,
         await db.execute(
             text("""
                 INSERT INTO ebay_accounts
-                    (id, user_id, ebay_username, access_token, refresh_token, token_expires_at, sandbox)
-                VALUES (:id, :uid, :username, :at, :rt, :exp, :sandbox)
+                    (id, user_id, ebay_username, ebay_email, access_token, refresh_token, token_expires_at, sandbox)
+                VALUES (:id, :uid, :username, :email, :at, :rt, :exp, :sandbox)
             """),
-            {"id": aid, "uid": user_id, "username": ebay_username,
+            {"id": aid, "uid": user_id, "username": ebay_username, "email": ebay_email,
              "at": access_token_enc, "rt": refresh_token_enc,
              "exp": expires_at, "sandbox": sandbox}
         )
         await db.commit()
     return aid
+
+
+async def delete_ebay_account(account_id: str, user_id: str) -> bool:
+    """Delete an eBay account. Returns True if a row was deleted."""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            text("DELETE FROM ebay_accounts WHERE id=:id AND user_id=:uid RETURNING id"),
+            {"id": account_id, "uid": user_id}
+        )
+        await db.commit()
+        return result.rowcount > 0
 
 
 async def count_demo_requests_from_ip(ip: str) -> int:
