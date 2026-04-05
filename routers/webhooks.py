@@ -64,7 +64,7 @@ async def paypal_webhook(request: Request):
             from db.supabase_client import AsyncSessionLocal
             async with AsyncSessionLocal() as db:
                 await db.execute(
-                    text("UPDATE users SET listings_used=0 WHERE id=:id"),
+                    text("UPDATE users SET listings_used=0, quota_reset_at=NOW() WHERE id=:id"),
                     {"id": user["id"]}
                 )
                 await db.commit()

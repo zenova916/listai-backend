@@ -17,6 +17,7 @@ BASE_URL = (
 PLAN_MAP = {
     os.getenv("PAYPAL_PLAN_STARTER", ""): "starter",
     os.getenv("PAYPAL_PLAN_PRO", ""):     "pro",
+    os.getenv("PAYPAL_PLAN_AGENCY", ""):  "agency",
 }
 
 

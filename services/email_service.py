@@ -70,7 +70,7 @@ def send_welcome_email(to: str, name: str):
 
 
 def send_plan_activated_email(to: str, name: str, plan: str):
-    quotas = {"starter": "50", "pro": "500"}
+    quotas = {"starter": "50", "pro": "500", "agency": "Unlimited"}
     quota = quotas.get(plan, "5")
     try:
         resend.Emails.send({
