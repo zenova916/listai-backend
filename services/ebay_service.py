@@ -50,6 +50,7 @@ def get_auth_url(sandbox: bool = False) -> str:
         f"&redirect_uri={EBAY_REDIRECT}"
         f"&response_type=code"
         f"&scope={EBAY_SCOPES}"
+        f"&prompt=login"
     )
 
 
