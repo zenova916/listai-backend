@@ -23,7 +23,6 @@ EBAY_SCOPES = " ".join([
     "https://api.ebay.com/oauth/api_scope",
     "https://api.ebay.com/oauth/api_scope/sell.inventory",
     "https://api.ebay.com/oauth/api_scope/sell.account",
-    "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
 ])
 
 
@@ -51,7 +50,6 @@ def get_auth_url(sandbox: bool = False) -> str:
         f"&redirect_uri={EBAY_REDIRECT}"
         f"&response_type=code"
         f"&scope={EBAY_SCOPES}"
-        f"&prompt=login"
     )
 
 
@@ -130,6 +128,10 @@ def _build_add_item_xml(listing: dict, token: str) -> str:
     <ConditionID>{_condition_id(cond)}</ConditionID>
     <Country>US</Country>
     <Currency>USD</Currency>
+    <Location>United States</Location>
+    <PostalCode>10001</PostalCode>
+    <PaymentMethods>PayPal</PaymentMethods>
+    <PayPalEmailAddress>paypal@ebaylistai.com</PayPalEmailAddress>
     <ListingDuration>GTC</ListingDuration>
     <ListingType>FixedPriceItem</ListingType>
     <Quantity>1</Quantity>
