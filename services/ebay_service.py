@@ -162,7 +162,7 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
     cond  = listing.get("final_condition") or listing.get("ai_condition", "Used")
     cat   = listing.get("final_category_id") or listing.get("ai_category_id", "")
     if not cat or cat in ("99", "0", "None", ""):
-        raise Exception("No valid eBay category ID. Please select a category from the dropdown before publishing.")
+        raise Exception("No valid eBay category ID. Please select a category before publishing.")
 
     policies = policies or {}
     shipping_id = policies.get("shipping_id")
@@ -236,7 +236,7 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
 </AddItemRequest>"""
 
 
-async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False) -> dict:
+async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False, refresh_token_enc: str = None, account_id: str = None) -> dict:
     """Publish a listing to eBay. Returns {item_id, url} or raises."""
     token = decrypt_token(access_token_enc)
     url   = EBAY_SANDBOX_TRADE if sandbox else EBAY_TRADING_URL
