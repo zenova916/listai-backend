@@ -162,25 +162,39 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
     cond  = listing.get("final_condition") or listing.get("ai_condition", "Used")
     cat   = listing.get("final_category_id") or listing.get("ai_category_id", "99")
 
-    # Build shipping/return/payment block based on whether seller uses business policies
     policies = policies or {}
     shipping_id = policies.get("shipping_id")
     return_id   = policies.get("return_id")
     payment_id  = policies.get("payment_id")
 
     if shipping_id or return_id or payment_id:
-        # Use business policies
+        # eBay business policies — correct XML structure
         seller_profiles = "<SellerProfiles>"
         if payment_id:
-            seller_profiles += f"<SellerPaymentProfile><PaymentProfileID>{payment_id}</PaymentProfileID></SellerPaymentProfile>"
+            seller_profiles += (
+                f"<SellerPaymentProfile>"
+                f"<PaymentProfileID>{payment_id}</PaymentProfileID>"
+                f"<PaymentProfileName>placeholder</PaymentProfileName>"
+                f"</SellerPaymentProfile>"
+            )
         if shipping_id:
-            seller_profiles += f"<SellerShippingProfile><ShippingProfileID>{shipping_id}</ShippingProfileID></SellerShippingProfile>"
+            seller_profiles += (
+                f"<SellerShippingProfile>"
+                f"<ShippingProfileID>{shipping_id}</ShippingProfileID>"
+                f"<ShippingProfileName>placeholder</ShippingProfileName>"
+                f"</SellerShippingProfile>"
+            )
         if return_id:
-            seller_profiles += f"<SellerReturnProfile><ReturnProfileID>{return_id}</ReturnProfileID></SellerReturnProfile>"
+            seller_profiles += (
+                f"<SellerReturnProfile>"
+                f"<ReturnProfileID>{return_id}</ReturnProfileID>"
+                f"<ReturnProfileName>placeholder</ReturnProfileName>"
+                f"</SellerReturnProfile>"
+            )
         seller_profiles += "</SellerProfiles>"
         shipping_block = seller_profiles
     else:
-        # Fallback to legacy fields
+        # Fallback: legacy fields for accounts without business policies
         shipping_block = """<ShippingDetails>
       <ShippingServiceOptions>
         <ShippingService>USPSPriority</ShippingService>
@@ -209,6 +223,7 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
     <ConditionID>{_condition_id(cond)}</ConditionID>
     <Country>US</Country>
     <Currency>USD</Currency>
+    <Location>United States</Location>
     <ListingDuration>GTC</ListingDuration>
     <ListingType>FixedPriceItem</ListingType>
     <Quantity>1</Quantity>
@@ -246,8 +261,10 @@ async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = 
 
     if ack not in ("Success", "Warning"):
         errors = root.findall(".//e:Error", namespaces=ns)
-        msgs   = [e.findtext("e:LongMessage", namespaces=ns) or "" for e in errors]
-        raise Exception(f"eBay AddItem failed: {'; '.join(msgs)}")
+        msgs   = [e.findtext("e:LongMessage", namespaces=ns) or e.findtext("e:ShortMessage", namespaces=ns) or "" for e in errors]
+        error_text = "; ".join(m for m in msgs if m) or r.text[:500]
+        print(f"[eBay] Publish failed. Ack={ack}. Errors: {error_text}")
+        raise Exception(f"eBay AddItem failed: {error_text}")
 
     item_id = root.findtext("e:ItemID", namespaces=ns)
     base    = "sandbox.ebay.com" if sandbox else "ebay.com"
