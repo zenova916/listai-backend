@@ -222,6 +222,8 @@ async def publish(req: PublishRequest, user=Depends(get_current_user)):
             listing,
             access_token_enc=account["access_token"],
             sandbox=account["sandbox"],
+            refresh_token_enc=account.get("refresh_token"),
+            account_id=account["id"],
         )
         await mark_listing_published(listing["id"], result["item_id"], result["url"])
         return {
@@ -230,8 +232,6 @@ async def publish(req: PublishRequest, user=Depends(get_current_user)):
             "ebay_url": result["url"],
         }
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         await mark_listing_failed(listing["id"], str(e))
         raise HTTPException(500, f"Publish failed: {e}")
 

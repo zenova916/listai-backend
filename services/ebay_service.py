@@ -74,6 +74,30 @@ async def exchange_code(code: str, sandbox: bool = False) -> dict:
     return r.json()
 
 
+# ── Token refresh ────────────────────────────────────────────
+
+async def refresh_access_token(refresh_token_enc: str, sandbox: bool = False) -> dict:
+    """Use refresh token to get a new access token."""
+    url = EBAY_SANDBOX_TOKEN if sandbox else EBAY_TOKEN_URL
+    refresh_token = decrypt_token(refresh_token_enc)
+    credentials = base64.b64encode(f"{EBAY_APP_ID}:{EBAY_CERT_ID}".encode()).decode()
+    async with httpx.AsyncClient() as client:
+        r = await client.post(
+            url,
+            headers={
+                "Authorization": f"Basic {credentials}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "scope": EBAY_SCOPES.replace("%20", " "),
+            },
+            timeout=15,
+        )
+    return r.json()
+
+
 # ── Trading API ───────────────────────────────────────────────
 
 async def get_seller_policies(access_token: str, sandbox: bool = False) -> dict:
@@ -234,7 +258,8 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
 </AddItemRequest>"""
 
 
-async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False) -> dict:
+async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False,
+                          refresh_token_enc: str = None, account_id: str = None) -> dict:
     """Publish a listing to eBay. Returns {item_id, url} or raises."""
     token = decrypt_token(access_token_enc)
     url   = EBAY_SANDBOX_TRADE if sandbox else EBAY_TRADING_URL
@@ -263,6 +288,40 @@ async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = 
         errors = root.findall(".//e:Error", namespaces=ns)
         msgs   = [e.findtext("e:LongMessage", namespaces=ns) or e.findtext("e:ShortMessage", namespaces=ns) or "" for e in errors]
         error_text = "; ".join(m for m in msgs if m) or r.text[:500]
+
+        # Auto-refresh if token expired (error code 932)
+        error_codes = [e.findtext("e:ErrorCode", namespaces=ns) or "" for e in errors]
+        if "932" in error_codes and refresh_token_enc and account_id:
+            print("[eBay] Token expired, attempting refresh...")
+            try:
+                new_tokens = await refresh_access_token(refresh_token_enc, sandbox=sandbox)
+                if "access_token" in new_tokens:
+                    new_enc = encrypt_token(new_tokens["access_token"])
+                    # Update token in DB
+                    from db.supabase_client import AsyncSessionLocal
+                    from sqlalchemy import text
+                    from datetime import datetime, timedelta, timezone
+                    expires_at = datetime.now(timezone.utc) + timedelta(seconds=new_tokens.get("expires_in", 7200))
+                    async with AsyncSessionLocal() as db:
+                        await db.execute(
+                            text("UPDATE ebay_accounts SET access_token=:tok, token_expires_at=:exp WHERE id=:id"),
+                            {"tok": new_enc, "exp": expires_at, "id": account_id}
+                        )
+                        await db.commit()
+                    # Retry with new token
+                    new_token = decrypt_token(new_enc)
+                    new_xml = _build_add_item_xml(listing, new_token, policies=policies)
+                    async with httpx.AsyncClient(timeout=30) as client:
+                        r2 = await client.post(url, content=new_xml.encode("utf-8"), headers=headers)
+                    root2 = ET.fromstring(r2.text)
+                    ack2  = root2.findtext("e:Ack", namespaces=ns)
+                    if ack2 in ("Success", "Warning"):
+                        item_id = root2.findtext("e:ItemID", namespaces=ns)
+                        base    = "sandbox.ebay.com" if sandbox else "ebay.com"
+                        return {"item_id": item_id, "url": f"https://www.{base}/itm/{item_id}"}
+            except Exception as re:
+                print(f"[eBay] Token refresh failed: {re}")
+
         print(f"[eBay] Publish failed. Ack={ack}. Errors: {error_text}")
         raise Exception(f"eBay AddItem failed: {error_text}")
 
