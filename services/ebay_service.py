@@ -128,6 +128,7 @@ def _build_add_item_xml(listing: dict, token: str) -> str:
     <ConditionID>{_condition_id(cond)}</ConditionID>
     <Country>US</Country>
     <Currency>USD</Currency>
+    <Location>United States</Location>
     <ListingDuration>GTC</ListingDuration>
     <ListingType>FixedPriceItem</ListingType>
     <Quantity>1</Quantity>
@@ -171,20 +172,19 @@ async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = 
         r = await client.post(url, content=xml.encode("utf-8"), headers=headers)
 
     ns   = {"e": "urn:ebay:apis:eBLBaseComponents"}
-    print(f"[eBay] Raw response: {r.text[:2000]}")  # log full response
     try:
         root = ET.fromstring(r.text)
-    except Exception as xe:
-        raise Exception(f"eBay returned invalid XML: {r.text[:500]}")
+    except Exception:
+        raise Exception(f"eBay returned invalid XML: {r.text[:300]}")
     ack  = root.findtext("e:Ack", namespaces=ns)
 
     if ack not in ("Success", "Warning"):
         errors = root.findall(".//e:Error", namespaces=ns)
         msgs = []
-        for e in errors:
-            code = e.findtext("e:ErrorCode", namespaces=ns) or ""
-            short = e.findtext("e:ShortMessage", namespaces=ns) or ""
-            long_ = e.findtext("e:LongMessage", namespaces=ns) or ""
+        for err in errors:
+            code  = err.findtext("e:ErrorCode", namespaces=ns) or ""
+            short = err.findtext("e:ShortMessage", namespaces=ns) or ""
+            long_ = err.findtext("e:LongMessage", namespaces=ns) or ""
             msgs.append(f"[{code}] {long_ or short}")
         raise Exception(f"eBay AddItem failed: {'; '.join(msgs) or r.text[:300]}")
 
