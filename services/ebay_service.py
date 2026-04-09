@@ -76,6 +76,53 @@ async def exchange_code(code: str, sandbox: bool = False) -> dict:
 
 # ── Trading API ───────────────────────────────────────────────
 
+async def get_seller_policies(access_token: str, sandbox: bool = False) -> dict:
+    """Fetch seller's business policy IDs from eBay Account API."""
+    base = "https://api.sandbox.ebay.com" if sandbox else "https://api.ebay.com"
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    }
+    policies = {"shipping_id": None, "return_id": None, "payment_id": None}
+    async with httpx.AsyncClient(timeout=15) as client:
+        # Fulfillment (shipping) policies
+        try:
+            r = await client.get(f"{base}/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US", headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                items = data.get("fulfillmentPolicies", [])
+                if items:
+                    policies["shipping_id"] = str(items[0]["fulfillmentPolicyId"])
+        except Exception as e:
+            print(f"[eBay] Could not fetch fulfillment policy: {e}")
+
+        # Return policies
+        try:
+            r = await client.get(f"{base}/sell/account/v1/return_policy?marketplace_id=EBAY_US", headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                items = data.get("returnPolicies", [])
+                if items:
+                    policies["return_id"] = str(items[0]["returnPolicyId"])
+        except Exception as e:
+            print(f"[eBay] Could not fetch return policy: {e}")
+
+        # Payment policies
+        try:
+            r = await client.get(f"{base}/sell/account/v1/payment_policy?marketplace_id=EBAY_US", headers=headers)
+            if r.status_code == 200:
+                data = r.json()
+                items = data.get("paymentPolicies", [])
+                if items:
+                    policies["payment_id"] = str(items[0]["paymentPolicyId"])
+        except Exception as e:
+            print(f"[eBay] Could not fetch payment policy: {e}")
+
+    print(f"[eBay] Policies fetched: {policies}")
+    return policies
+
+
 def _condition_id(condition: str) -> str:
     mapping = {
         "New": "1000", "Like New": "1500", "Very Good": "2000",
@@ -92,7 +139,7 @@ def _esc(s: str) -> str:
             .replace('"', "&quot;"))
 
 
-def _build_add_item_xml(listing: dict, token: str) -> str:
+def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str:
     import json
     specifics = {}
     try:
@@ -115,6 +162,40 @@ def _build_add_item_xml(listing: dict, token: str) -> str:
     cond  = listing.get("final_condition") or listing.get("ai_condition", "Used")
     cat   = listing.get("final_category_id") or listing.get("ai_category_id", "99")
 
+    # Build shipping/return/payment block based on whether seller uses business policies
+    policies = policies or {}
+    shipping_id = policies.get("shipping_id")
+    return_id   = policies.get("return_id")
+    payment_id  = policies.get("payment_id")
+
+    if shipping_id or return_id or payment_id:
+        # Use business policies
+        seller_profiles = "<SellerProfiles>"
+        if payment_id:
+            seller_profiles += f"<SellerPaymentProfile><PaymentProfileID>{payment_id}</PaymentProfileID></SellerPaymentProfile>"
+        if shipping_id:
+            seller_profiles += f"<SellerShippingProfile><ShippingProfileID>{shipping_id}</ShippingProfileID></SellerShippingProfile>"
+        if return_id:
+            seller_profiles += f"<SellerReturnProfile><ReturnProfileID>{return_id}</ReturnProfileID></SellerReturnProfile>"
+        seller_profiles += "</SellerProfiles>"
+        shipping_block = seller_profiles
+    else:
+        # Fallback to legacy fields
+        shipping_block = """<ShippingDetails>
+      <ShippingServiceOptions>
+        <ShippingService>USPSPriority</ShippingService>
+        <ShippingServiceCost currencyID="USD">0.00</ShippingServiceCost>
+        <ShippingServicePriority>1</ShippingServicePriority>
+        <FreeShipping>true</FreeShipping>
+      </ShippingServiceOptions>
+    </ShippingDetails>
+    <ReturnPolicy>
+      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
+      <RefundOption>MoneyBack</RefundOption>
+      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
+      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
+    </ReturnPolicy>"""
+
     return f"""<?xml version="1.0" encoding="utf-8"?>
 <AddItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">
   <RequesterCredentials><eBayAuthToken>{token}</eBayAuthToken></RequesterCredentials>
@@ -128,26 +209,12 @@ def _build_add_item_xml(listing: dict, token: str) -> str:
     <ConditionID>{_condition_id(cond)}</ConditionID>
     <Country>US</Country>
     <Currency>USD</Currency>
-    <Location>United States</Location>
     <ListingDuration>GTC</ListingDuration>
     <ListingType>FixedPriceItem</ListingType>
     <Quantity>1</Quantity>
     <ItemSpecifics>{specifics_xml}</ItemSpecifics>
     <DispatchTimeMax>3</DispatchTimeMax>
-    <ShippingDetails>
-      <ShippingServiceOptions>
-        <ShippingService>USPSPriority</ShippingService>
-        <ShippingServiceCost currencyID="USD">0.00</ShippingServiceCost>
-        <ShippingServicePriority>1</ShippingServicePriority>
-        <FreeShipping>true</FreeShipping>
-      </ShippingServiceOptions>
-    </ShippingDetails>
-    <ReturnPolicy>
-      <ReturnsAcceptedOption>ReturnsAccepted</ReturnsAcceptedOption>
-      <RefundOption>MoneyBack</RefundOption>
-      <ReturnsWithinOption>Days_30</ReturnsWithinOption>
-      <ShippingCostPaidByOption>Buyer</ShippingCostPaidByOption>
-    </ReturnPolicy>
+    {shipping_block}
   </Item>
 </AddItemRequest>"""
 
@@ -156,7 +223,9 @@ async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = 
     """Publish a listing to eBay. Returns {item_id, url} or raises."""
     token = decrypt_token(access_token_enc)
     url   = EBAY_SANDBOX_TRADE if sandbox else EBAY_TRADING_URL
-    xml   = _build_add_item_xml(listing, token)
+    # Fetch seller's business policies automatically
+    policies = await get_seller_policies(token, sandbox=sandbox)
+    xml   = _build_add_item_xml(listing, token, policies=policies)
 
     headers = {
         "X-EBAY-API-SITEID":              EBAY_SITE_ID,
@@ -172,21 +241,13 @@ async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = 
         r = await client.post(url, content=xml.encode("utf-8"), headers=headers)
 
     ns   = {"e": "urn:ebay:apis:eBLBaseComponents"}
-    try:
-        root = ET.fromstring(r.text)
-    except Exception:
-        raise Exception(f"eBay returned invalid XML: {r.text[:300]}")
+    root = ET.fromstring(r.text)
     ack  = root.findtext("e:Ack", namespaces=ns)
 
     if ack not in ("Success", "Warning"):
         errors = root.findall(".//e:Error", namespaces=ns)
-        msgs = []
-        for err in errors:
-            code  = err.findtext("e:ErrorCode", namespaces=ns) or ""
-            short = err.findtext("e:ShortMessage", namespaces=ns) or ""
-            long_ = err.findtext("e:LongMessage", namespaces=ns) or ""
-            msgs.append(f"[{code}] {long_ or short}")
-        raise Exception(f"eBay AddItem failed: {'; '.join(msgs) or r.text[:300]}")
+        msgs   = [e.findtext("e:LongMessage", namespaces=ns) or "" for e in errors]
+        raise Exception(f"eBay AddItem failed: {'; '.join(msgs)}")
 
     item_id = root.findtext("e:ItemID", namespaces=ns)
     base    = "sandbox.ebay.com" if sandbox else "ebay.com"
