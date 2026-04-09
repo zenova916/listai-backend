@@ -79,7 +79,7 @@ async def ebay_callback(code: str = None, state: str = "", error: str = None):
             f"{FRONTEND}/listing-tool.html?ebay=error&reason=user_not_found"
         )
 
-    plan = user.get("plan", "free")
+    plan = user.get("plan") or "free"
     max_accounts = PLAN_EBAY_ACCOUNTS.get(plan, 1)
     existing_accounts = await get_ebay_accounts(user_id)
 
@@ -125,7 +125,7 @@ async def ebay_callback(code: str = None, state: str = "", error: str = None):
 @router.get("/accounts")
 async def list_accounts(user=Depends(get_current_user)):
     accounts = await get_ebay_accounts(user["id"])
-    plan = user.get("plan", "free")
+    plan = user.get("plan") or "free"
     max_accounts = PLAN_EBAY_ACCOUNTS.get(plan, 1)
     return {
         "accounts": accounts,
