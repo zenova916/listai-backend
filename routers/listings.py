@@ -230,6 +230,8 @@ async def publish(req: PublishRequest, user=Depends(get_current_user)):
             "ebay_url": result["url"],
         }
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         await mark_listing_failed(listing["id"], str(e))
         raise HTTPException(500, f"Publish failed: {e}")
 
