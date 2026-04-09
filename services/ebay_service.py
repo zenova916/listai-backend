@@ -125,20 +125,10 @@ async def get_seller_policies(access_token: str, sandbox: bool = False) -> dict:
 
 def _condition_id(condition: str) -> str:
     mapping = {
-        "New": "1000",
-        "Like New": "1500",
-        "Very Good": "2000",
-        "Good": "3000",
-        "Acceptable": "4000",
-        "For parts": "7000",
-        "Used": "3000",
-        "Pre-owned": "3000",
+        "New": "1000", "Like New": "1500", "Very Good": "2000",
+        "Good": "3000", "Acceptable": "4000", "For parts": "7000",
     }
     return mapping.get(condition, "3000")
-
-def _is_valid_category(cat_id: str) -> bool:
-    """Check if category ID is a real value."""
-    return bool(cat_id) and cat_id not in ("99", "0", "", "None")
 
 
 def _esc(s: str) -> str:
@@ -171,8 +161,8 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
     price = listing.get("final_price") or listing.get("ai_price", 9.99)
     cond  = listing.get("final_condition") or listing.get("ai_condition", "Used")
     cat   = listing.get("final_category_id") or listing.get("ai_category_id", "")
-    if not _is_valid_category(cat):
-        raise Exception("No valid eBay category ID. Please select a category before publishing.")
+    if not cat or cat in ("99", "0", "None", ""):
+        raise Exception("No valid eBay category ID. Please select a category from the dropdown before publishing.")
 
     policies = policies or {}
     shipping_id = policies.get("shipping_id")
