@@ -367,7 +367,7 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
 </AddItemRequest>"""
 
 
-async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False, refresh_token_enc: str = None, account_id: str = None) -> dict:    """Publish a listing to eBay. Returns {item_id, url} or raises."""
+ async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False) -> dict:
     token = decrypt_token(access_token_enc)
     url   = EBAY_SANDBOX_TRADE if sandbox else EBAY_TRADING_URL
     # Fetch seller's business policies automatically
