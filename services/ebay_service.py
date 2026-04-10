@@ -123,6 +123,133 @@ async def get_seller_policies(access_token: str, sandbox: bool = False) -> dict:
     return policies
 
 
+# ── eBay US Category ID map ──────────────────────────────────
+EBAY_CATEGORY_MAP = {
+    # Electronics
+    "cell phones & smartphones": "9355",
+    "apple iphones": "9355",
+    "samsung phones": "9355",
+    "laptops & netbooks": "177",
+    "apple laptops": "111422",
+    "tablets & ebook readers": "171485",
+    "headphones": "112529",
+    "portable audio & headphones": "15052",
+    "cameras & photo": "625",
+    "digital cameras": "31388",
+    "video games": "1249",
+    "video game consoles": "139971",
+    "televisions": "11071",
+    "tv, video & home audio": "11071",
+    "computer components & parts": "175673",
+    "printers & scanners": "1245",
+    "consumer electronics": "293",
+    # Clothing
+    "men's clothing": "1059",
+    "women's clothing": "15724",
+    "men's shoes": "93427",
+    "women's shoes": "3034",
+    "men's t-shirts": "185100",
+    "women's dresses": "63861",
+    "hoodies & sweatshirts": "185101",
+    "jeans": "11483",
+    "men's accessories": "4250",
+    "women's accessories": "4251",
+    # Jewelry & Watches
+    "fine jewelry": "281",
+    "fashion jewelry": "10968",
+    "rings": "67726",
+    "necklaces & pendants": "164342",
+    "bracelets": "137835",
+    "earrings": "10985",
+    "watches": "31387",
+    "wristwatches": "31387",
+    # Home & Garden
+    "home & garden": "11700",
+    "furniture": "3197",
+    "kitchen & dining": "20625",
+    "kitchen, dining & bar": "20625",
+    "bedding": "20444",
+    "tools & workshop equipment": "631",
+    "garden & patio": "159912",
+    "home décor": "10033",
+    "lamps, lighting & ceiling fans": "20697",
+    # Health & Beauty
+    "health & beauty": "26395",
+    "hair care": "11854",
+    "hair care & styling": "11854",
+    "hair dryers": "20710",
+    "hair dryers & styling tools": "20710",
+    "hair dryers & hair care appliances": "20710",
+    "skin care": "11863",
+    "makeup": "31786",
+    "fragrances": "180345",
+    "vitamins & dietary supplements": "180959",
+    # Toys & Hobbies
+    "toys & hobbies": "220",
+    "lego sets": "19006",
+    "action figures": "246",
+    "dolls & bears": "238",
+    "building toys": "183446",
+    "die-cast & toy vehicles": "222",
+    "model trains": "180250",
+    # Sporting Goods
+    "sporting goods": "888",
+    "golf": "1513",
+    "cycling": "7294",
+    "exercise & fitness": "15273",
+    "fishing": "724",
+    "outdoor sports": "1000",
+    # Books & Media
+    "books": "267",
+    "music cds": "306",
+    "movies & tv": "11232",
+    "video games & consoles": "1249",
+    # Collectibles
+    "collectibles": "1",
+    "coins": "11116",
+    "sports cards": "212",
+    "stamps": "260",
+    "art": "550",
+    # Automotive
+    "auto parts & accessories": "6028",
+    "car electronics": "3270",
+    "motorcycles": "6024",
+    # Baby
+    "baby": "2984",
+    "strollers": "66696",
+    # Musical Instruments
+    "musical instruments": "619",
+    "guitars": "33034",
+    "pianos & keyboards": "16218",
+    # Pet Supplies
+    "pet supplies": "1281",
+    "dog supplies": "20744",
+    "cat supplies": "20741",
+    # Business & Industrial
+    "business & industrial": "12576",
+    "office equipment": "2536",
+}
+
+def _lookup_category_id(category_path: str) -> str:
+    """Look up eBay category ID from category name/path."""
+    if not category_path:
+        return ""
+    path_lower = category_path.lower().strip()
+    # Try full path first
+    if path_lower in EBAY_CATEGORY_MAP:
+        return EBAY_CATEGORY_MAP[path_lower]
+    # Try each segment from most specific (last) to least specific (first)
+    parts = [p.strip().lower() for p in path_lower.split(">")]
+    for part in reversed(parts):
+        if part in EBAY_CATEGORY_MAP:
+            return EBAY_CATEGORY_MAP[part]
+        # Try partial match
+        for key, val in EBAY_CATEGORY_MAP.items():
+            if part in key or key in part:
+                return val
+    return ""
+
+
 def _condition_id(condition: str) -> str:
     mapping = {
         "New": "1000", "Like New": "1500", "Very Good": "2000",
@@ -160,9 +287,13 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
     desc  = listing.get("final_description") or listing.get("ai_description", "")
     price = listing.get("final_price") or listing.get("ai_price", 9.99)
     cond  = listing.get("final_condition") or listing.get("ai_condition", "Used")
-    cat   = listing.get("final_category_id") or listing.get("ai_category_id", "")
-    if not cat or cat in ("99", "0", "None", ""):
-        raise Exception("No valid eBay category ID. Please select a category before publishing.")
+    cat = listing.get("final_category_id") or listing.get("ai_category_id", "")
+    if not cat or cat in ("99", "0", "None", "", "null"):
+        cat_name = listing.get("ai_category", "") or ""
+        cat = _lookup_category_id(cat_name)
+    if not cat:
+        raise Exception("Could not determine eBay category. Please select a category from the dropdown before publishing.")
+    print(f"[eBay] Using category ID: {cat}")
 
     policies = policies or {}
     shipping_id = policies.get("shipping_id")
@@ -236,7 +367,7 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
 </AddItemRequest>"""
 
 
-async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False, refresh_token_enc: str = None, account_id: str = None) -> dict:
+async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False) -> dict:
     """Publish a listing to eBay. Returns {item_id, url} or raises."""
     token = decrypt_token(access_token_enc)
     url   = EBAY_SANDBOX_TRADE if sandbox else EBAY_TRADING_URL

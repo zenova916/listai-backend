@@ -18,7 +18,7 @@ Return exactly this structure:
   "title": "string — max 80 characters, keyword-rich, starts with Brand + Model",
   "description": "string — 150-300 words, plain text, highlight condition/features/what's included",
   "category": "string — eBay US category path e.g. Consumer Electronics > Audio > Portable Players",
-  "category_id": "string — eBay US numeric category ID best guess",
+  "category_id": "",
   "condition": "string — one of: New, Like New, Very Good, Good, Acceptable, For parts",
   "item_specifics": {
     "Brand": "string",
