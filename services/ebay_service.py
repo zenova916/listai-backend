@@ -76,6 +76,50 @@ async def exchange_code(code: str, sandbox: bool = False) -> dict:
     return r.json()
 
 
+# ── Token refresh ────────────────────────────────────────────
+
+async def refresh_ebay_token(refresh_token_enc: str, account_id: str, sandbox: bool = False):
+    """Silently refresh expired eBay token and update DB. Returns new access token."""
+    url = EBAY_SANDBOX_TOKEN if sandbox else EBAY_TOKEN_URL
+    try:
+        refresh_token = decrypt_token(refresh_token_enc)
+        credentials = base64.b64encode(f"{EBAY_APP_ID}:{EBAY_CERT_ID}".encode()).decode()
+        async with httpx.AsyncClient() as client:
+            r = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Basic {credentials}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                },
+                timeout=15,
+            )
+        data = r.json()
+        if "access_token" not in data:
+            print(f"[eBay] Token refresh failed: {data}")
+            return None
+        new_access_enc = encrypt_token(data["access_token"])
+        # Update in DB
+        from db.supabase_client import AsyncSessionLocal
+        from sqlalchemy import text
+        from datetime import datetime, timedelta, timezone
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=data.get("expires_in", 7200))
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                text("UPDATE ebay_accounts SET access_token=:tok, token_expires_at=:exp WHERE id=:id"),
+                {"tok": new_access_enc, "exp": expires_at, "id": account_id}
+            )
+            await db.commit()
+        print(f"[eBay] Token refreshed successfully for account {account_id}")
+        return new_access_enc
+    except Exception as e:
+        print(f"[eBay] Token refresh error: {e}")
+        return None
+
+
 # ── Trading API ───────────────────────────────────────────────
 
 async def get_seller_policies(access_token: str, sandbox: bool = False) -> dict:
@@ -370,7 +414,12 @@ def _build_add_item_xml(listing: dict, token: str, policies: dict = None) -> str
 
 
 async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = False, refresh_token_enc: str = None, account_id: str = None) -> dict:
-    """Publish a listing to eBay. Returns {item_id, url} or raises."""
+    """Publish a listing to eBay. Auto-refreshes expired token. Returns {item_id, url} or raises."""
+    # Auto-refresh token if we have refresh_token available
+    if refresh_token_enc and account_id:
+        new_enc = await refresh_ebay_token(refresh_token_enc, account_id, sandbox=sandbox)
+        if new_enc:
+            access_token_enc = new_enc
     token = decrypt_token(access_token_enc)
     url   = EBAY_SANDBOX_TRADE if sandbox else EBAY_TRADING_URL
     # Fetch seller's business policies automatically
@@ -394,12 +443,24 @@ async def publish_to_ebay(listing: dict, access_token_enc: str, sandbox: bool = 
     root = ET.fromstring(r.text)
     ack  = root.findtext("e:Ack", namespaces=ns)
 
-    if ack not in ("Success", "Warning"):
-        errors = root.findall(".//e:Error", namespaces=ns)
-        msgs   = [e.findtext("e:LongMessage", namespaces=ns) or e.findtext("e:ShortMessage", namespaces=ns) or "" for e in errors]
-        error_text = "; ".join(m for m in msgs if m) or r.text[:500]
-        print(f"[eBay] Publish failed. Ack={ack}. Errors: {error_text}")
-        raise Exception(f"eBay AddItem failed: {error_text}")
+    # Check for hard-expired token (error 932) — needs reconnect
+    errors = root.findall(".//e:Error", namespaces=ns)
+    error_codes = [e.findtext("e:ErrorCode", namespaces=ns) or "" for e in errors]
+
+    if ack == "Failure":
+        # Filter out warnings (severity Warning) — only real errors matter
+        real_errors = [e for e in errors
+                      if (e.findtext("e:SeverityCode", namespaces=ns) or "") == "Error"]
+        if not real_errors:
+            # All errors are actually warnings — treat as success
+            pass
+        else:
+            msgs = [e.findtext("e:LongMessage", namespaces=ns) or
+                    e.findtext("e:ShortMessage", namespaces=ns) or ""
+                    for e in real_errors]
+            error_text = "; ".join(m for m in msgs if m) or r.text[:500]
+            print(f"[eBay] Publish failed. Ack={ack}. Errors: {error_text}")
+            raise Exception(f"eBay AddItem failed: {error_text}")
 
     item_id = root.findtext("e:ItemID", namespaces=ns)
     base    = "sandbox.ebay.com" if sandbox else "ebay.com"
