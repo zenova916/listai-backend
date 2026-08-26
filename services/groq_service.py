@@ -164,3 +164,22 @@ async def generate_listing_from_image(image_bytes: bytes, filename: str) -> dict
     )
     raw = response.choices[0].message.content.strip()
     return _parse_json(raw)
+  
+    response = await client.chat.completions.create(
+    model=VISION_MODEL,
+    messages=[{
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": SYSTEM_PROMPT + "\n\nLook at this product image carefully. Identify the brand, model, condition, and all visible features. Generate a complete eBay US listing JSON. Return ONLY the JSON object, nothing else. Use plain text in description field, no HTML tags."
+            },
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:{media_type};base64,{b64}"}
+            }
+        ]
+    }],
+    temperature=0.2,
+    max_tokens=2000,
+)
