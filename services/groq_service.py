@@ -2,7 +2,7 @@
 services/groq_service.py
 Generates SEO-optimized eBay listing content using Groq AI.
 """
-import os, json, re
+import os, json, re, base64
 from groq import AsyncGroq
 
 client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
@@ -83,7 +83,6 @@ async def generate_listing_from_csv_row(row: dict) -> dict:
 
 async def generate_listing_from_image(image_bytes: bytes, filename: str) -> dict:
   """Image upload → product identification → full listing."""
-    import base64
     VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
     
     b64 = base64.b64encode(image_bytes).decode()
