@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Backgro
 from pydantic import BaseModel
 from typing import Optional
 from services.auth_service import get_current_user
-from services.groq_service import generate_listing_from_title, generate_listing_from_csv_row
+from services.groq_service import generate_listing_from_title, generate_listing_from_csv_row, generate_listing_from_image
 from services.ebay_service import publish_to_ebay, get_item_status
 from db.supabase_client import (
     save_listing, get_user_listings, update_listing,
@@ -182,6 +182,51 @@ async def _process_csv_rows(rows: list[dict], user_id: str, ebay_account_id: str
         except Exception as e:
             print(f"[CSV] Row failed: {e}")
 
+
+@router.post("/generate/image")
+async def generate_from_image_upload(
+    file: UploadFile = File(...),
+    condition: str = "Used",
+    ebay_account_id: str = "",
+    user=Depends(get_current_user),
+):
+    await check_quota(user, 1)
+    contents = await file.read()
+    if len(contents) > 5 * 1024 * 1024:
+        raise HTTPException(400, "Image too large — max 5MB")
+
+    try:
+        ai = await generate_listing_from_image(contents, file.filename)
+    except Exception as e:
+        raise HTTPException(500, f"AI generation failed: {e}")
+
+    lid = str(uuid.uuid4())
+    specifics_json = json.dumps(ai.get("item_specifics", {}))
+    listing = {
+        "id":                lid,
+        "user_id":           user["id"],
+        "ebay_account_id":   ebay_account_id or None,
+        "input_type":        "image",
+        "input_raw":         file.filename,
+        "ai_title":          ai.get("title", ""),
+        "ai_description":    ai.get("description", ""),
+        "ai_category":       ai.get("category", ""),
+        "ai_category_id":    ai.get("category_id", ""),
+        "ai_condition":      ai.get("condition", condition),
+        "ai_price":          ai.get("price", 0),
+        "ai_specifics":      specifics_json,
+        "final_title":       ai.get("title", ""),
+        "final_description": ai.get("description", ""),
+        "final_price":       ai.get("price", 0),
+        "final_condition":   ai.get("condition", condition),
+        "final_category_id": ai.get("category_id", ""),
+        "final_specifics":   specifics_json,
+    }
+    await save_listing(listing)
+    await consume_quota(user["id"], 1)
+    return {**listing, "ai_specifics": ai.get("item_specifics", {}),
+            "final_specifics": ai.get("item_specifics", {}),
+            "price_low": ai.get("price_low"), "price_high": ai.get("price_high")}
 
 @router.get("/")
 async def get_listings(
