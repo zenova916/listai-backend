@@ -81,6 +81,40 @@ async def generate_listing_from_csv_row(row: dict) -> dict:
     return _parse_json(raw)
 
 
+async def generate_from_image(image_bytes: bytes, filename: str, user_id: str, ebay_account_id: str) -> dict:
+    """Image upload → product identification → full listing."""
+    import base64
+    VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+    
+    b64 = base64.b64encode(image_bytes).decode()
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
+    media_type = f"image/{ext}" if ext in ("jpg","jpeg","png","webp","gif") else "image/jpeg"
+    if ext == "jpg":
+        media_type = "image/jpeg"
+
+    response = await client.chat.completions.create(
+        model=VISION_MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": [
+                {
+                    "type": "text",
+                    "text": "Look at this product image carefully. Identify the brand, model, condition, and all visible features. Then generate a complete eBay US listing JSON. Return ONLY the JSON object, nothing else."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{media_type};base64,{b64}"
+                    }
+                }
+            ]}
+        ],
+        temperature=0.2,
+        max_tokens=2000,
+    )
+    raw = response.choices[0].message.content.strip()
+    return _parse_json(raw)
+
 async def generate_demo_listing(title: str) -> dict:
     """Demo version for landing page — no auth required."""
     return await generate_listing_from_title(title, condition="Used")
