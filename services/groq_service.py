@@ -81,39 +81,6 @@ async def generate_listing_from_csv_row(row: dict) -> dict:
     return _parse_json(raw)
 
 
-async def generate_listing_from_image(image_bytes: bytes, filename: str) -> dict:
-  """Image upload → product identification → full listing."""
-    VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
-    
-    b64 = base64.b64encode(image_bytes).decode()
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
-    media_type = f"image/{ext}" if ext in ("jpg","jpeg","png","webp","gif") else "image/jpeg"
-    if ext == "jpg":
-        media_type = "image/jpeg"
-
-    response = await client.chat.completions.create(
-        model=VISION_MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": [
-                {
-                    "type": "text",
-                    "text": "Look at this product image carefully. Identify the brand, model, condition, and all visible features. Then generate a complete eBay US listing JSON. Return ONLY the JSON object, nothing else."
-                },
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:{media_type};base64,{b64}"
-                    }
-                }
-            ]}
-        ],
-        temperature=0.2,
-        max_tokens=2000,
-    )
-    raw = response.choices[0].message.content.strip()
-    return _parse_json(raw)
-
 async def generate_demo_listing(title: str) -> dict:
     """Demo version for landing page — no auth required."""
     return await generate_listing_from_title(title, condition="Used")
@@ -168,3 +135,32 @@ def _parse_json(raw: str) -> dict:
             return json.loads(json_str)
         except json.JSONDecodeError:
             raise ValueError(f"Could not parse Groq response as JSON: {str(e)} | Raw: {raw[:300]}")
+
+
+async def generate_listing_from_image(image_bytes: bytes, filename: str) -> dict:
+    """Image upload → AI reads product from photo → full eBay listing JSON."""
+    VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+    b64 = base64.b64encode(image_bytes).decode()
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
+    media_type = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+
+    response = await client.chat.completions.create(
+        model=VISION_MODEL,
+        messages=[{
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": SYSTEM_PROMPT + "\n\nLook at this product image carefully. Identify the brand, model, condition, and all visible features. Generate a complete eBay US listing JSON. Return ONLY the JSON object, nothing else."
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{b64}"}
+                }
+            ]
+        }],
+        temperature=0.2,
+        max_tokens=2000,
+    )
+    raw = response.choices[0].message.content.strip()
+    return _parse_json(raw)
