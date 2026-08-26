@@ -6,7 +6,7 @@ import os, json
 from groq import AsyncGroq
 
 client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
-MODEL = "llama-3.3-70b-versatile"
+MODEL = os.getenv("GROQ_MODEL", "llama3-70b-8192")
 
 SYSTEM_PROMPT = """You are an expert eBay US listing copywriter with 10 years of experience.
 Your listings rank highly in eBay search and convert browsers into buyers.
