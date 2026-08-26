@@ -78,8 +78,15 @@ async def generate_demo_listing(title: str) -> dict:
 
 
 def _parse_json(raw: str) -> dict:
-    """Safely parse JSON from Groq response, stripping any markdown fences."""
-    # Strip ```json ... ``` if model wraps it
+    """Safely parse JSON from Groq response."""
+    if not raw:
+        raise ValueError("Empty response from Groq")
+    
+    # Strip thinking/reasoning blocks first
+    if "<think>" in raw:
+        raw = raw.split("</think>")[-1].strip()
+    
+    # Strip markdown fences
     if "```" in raw:
         parts = raw.split("```")
         for part in parts:
@@ -89,13 +96,11 @@ def _parse_json(raw: str) -> dict:
             if part.startswith("{"):
                 raw = part
                 break
-
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        # Find first { to last } and try again
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start != -1 and end > start:
-            return json.loads(raw[start:end])
-        raise ValueError(f"Could not parse Groq response as JSON: {raw[:200]}")
+    
+    # Find first { to last }
+    start = raw.find("{")
+    end = raw.rfind("}") + 1
+    if start != -1 and end > start:
+        raw = raw[start:end]
+    
+    return json.loads(raw)
