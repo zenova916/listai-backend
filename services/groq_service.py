@@ -138,20 +138,37 @@ def _parse_json(raw: str) -> dict:
 
 
 async def generate_listing_from_image(image_bytes: bytes, filename: str) -> dict:
-    """Image upload → AI reads product from photo → full eBay listing JSON."""
+    """
+    Image upload → 2-step pipeline:
+    Step 1: Vision model extracts product details from photo
+    Step 2: Main model generates full SEO-optimized listing from those details
+    """
     VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
     b64 = base64.b64encode(image_bytes).decode()
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else "jpg"
     media_type = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
 
-    response = await client.chat.completions.create(
+    # Step 1: Extract product details from image
+    vision_response = await client.chat.completions.create(
         model=VISION_MODEL,
         messages=[{
             "role": "user",
             "content": [
                 {
                     "type": "text",
-                    "text": SYSTEM_PROMPT + "\n\nLook at this product image carefully. Identify the brand, model, condition, and all visible features. Generate a complete eBay US listing JSON. Return ONLY the JSON object, nothing else."
+                    "text": """Look at this product image very carefully.
+Extract and list ALL of the following details you can see:
+- Brand name (look for logos, text on product)
+- Model name/number
+- Color(s)
+- Condition (visible wear, scratches, damage)
+- Type of product
+- Key features visible
+- Any text, numbers, or labels on the product
+- Approximate size if determinable
+- What accessories/parts are visible
+
+Respond in plain text with clear labels. Be specific and detailed. Do not generate a listing yet."""
                 },
                 {
                     "type": "image_url",
@@ -159,27 +176,24 @@ async def generate_listing_from_image(image_bytes: bytes, filename: str) -> dict
                 }
             ]
         }],
+        temperature=0.1,
+        max_tokens=500,
+    )
+
+    # Extract the vision response, strip any thinking tags
+    vision_raw = vision_response.choices[0].message.content.strip()
+    if "<think>" in vision_raw:
+        vision_raw = re.sub(r'<think>.*?</think>', '', vision_raw, flags=re.DOTALL).strip()
+
+    # Step 2: Use main model to generate full SEO listing from extracted details
+    full_response = await client.chat.completions.create(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": f"Product details extracted from image:\n\n{vision_raw}\n\nGenerate the complete eBay listing JSON now. Return ONLY the JSON object, nothing else."}
+        ],
         temperature=0.2,
         max_tokens=2000,
     )
-    raw = response.choices[0].message.content.strip()
+    raw = full_response.choices[0].message.content.strip()
     return _parse_json(raw)
-  
-    response = await client.chat.completions.create(
-    model=VISION_MODEL,
-    messages=[{
-        "role": "user",
-        "content": [
-            {
-                "type": "text",
-                "text": SYSTEM_PROMPT + "\n\nLook at this product image carefully. Identify the brand, model, condition, and all visible features. Generate a complete eBay US listing JSON. Return ONLY the JSON object, nothing else. Use plain text in description field, no HTML tags."
-            },
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:{media_type};base64,{b64}"}
-            }
-        ]
-    }],
-    temperature=0.2,
-    max_tokens=2000,
-)
